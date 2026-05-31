@@ -13,14 +13,48 @@ const __dirname = dirname(__filename);
 // SERVIDOR WEB PARA RENDER (Keep Alive)
 // ============================================
 
+let lastScanTime = Date.now();
+let lastScanInfo = {
+    tokens: 0,
+    signals: 0,
+    rugBlocks: 0
+};
+
 const server = http.createServer((req, res) => {
-    res.writeHead(200, { 'Content-Type': 'text/plain' });
-    res.end('Dante Bot is running!\n');
+    // Endpoint /ping para UptimeRobot (mantiene el bot activo)
+    if (req.url === '/ping') {
+        res.writeHead(200, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify({ 
+            status: 'ok', 
+            uptime: process.uptime(),
+            lastScan: new Date(lastScanTime).toLocaleString(),
+            scans: totalScans || 0,
+            lastScanInfo: lastScanInfo
+        }));
+    } 
+    // Endpoint /stats para ver estadísticas
+    else if (req.url === '/stats') {
+        res.writeHead(200, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify({ 
+            scans: totalScans || 0,
+            tokensAnalyzed: totalTokensAnalyzed || 0,
+            rugBlocks: totalRugBlocks || 0,
+            activePositions: activePositions?.size || 0,
+            apiCalls: totalApiCalls || 0,
+            cacheHits: totalCacheHits || 0
+        }));
+    }
+    else {
+        res.writeHead(200, { 'Content-Type': 'text/plain' });
+        res.end('Dante Bot is running!\n');
+    }
 });
 
 const PORT = process.env.PORT || 3000;
 server.listen(PORT, () => {
     console.log(`🌐 Web server running on port ${PORT}`);
+    console.log(`   • /ping - Health check para UptimeRobot`);
+    console.log(`   • /stats - Estadísticas del bot`);
 });
 
 // ============================================
@@ -532,6 +566,14 @@ async function processTokens(isManualCommand = false, msg = null) {
     totalScans++;
     totalTokensAnalyzed += tokens.length;
     
+    // Actualizar info para el endpoint /ping
+    lastScanTime = Date.now();
+    lastScanInfo = {
+        tokens: tokens.length,
+        signals: 0,
+        rugBlocks: 0
+    };
+    
     let topResults = [];
     let tokensFound = 0;
     let rugPrevented = 0;
@@ -629,6 +671,13 @@ https://dexscreener.com/solana/${token.address}
     }
     
     totalRugBlocks += rugPrevented;
+    
+    // Actualizar info del último escaneo
+    lastScanInfo = {
+        tokens: tokens.length,
+        signals: tokensFound,
+        rugBlocks: rugPrevented
+    };
     
     console.log(`\n📊 Escaneo #${totalScans} completado:`);
     console.log(`   • Tokens: ${tokens.length} | Filtrados: ${quickFilterPassed}`);
@@ -985,6 +1034,11 @@ Bienvenido <b>${msg.from.first_name || 'Trader'}</b>!
         bot.sendMessage(chatId, message, { parse_mode: 'HTML' }).catch(e => console.log("Error:", e.message));
     });
 
+    // /ping (comando para verificar que el bot responde)
+    bot.onText(/\/ping/, (msg) => {
+        bot.sendMessage(msg.chat.id, `🏓 Pong! Bot activo desde hace ${Math.floor(process.uptime())} segundos. Último escaneo: ${new Date(lastScanTime).toLocaleString()}`, { parse_mode: 'HTML' }).catch(e => console.log("Error:", e.message));
+    });
+
     // Manejo de errores de polling
     bot.on('polling_error', (error) => {
         console.log(`⚠️ Error de polling: ${error.code || error.message}`);
@@ -1058,6 +1112,7 @@ async function main() {
     
     // Escaneo automático cada 5 minutos
     setInterval(() => {
+        console.log("⏰ Ejecutando escaneo automático programado...");
         processTokens(false);
     }, OPTIMIZATION.SCAN_INTERVAL);
     
@@ -1085,7 +1140,7 @@ async function main() {
     await processTokens(false);
     
     console.log("\n✅ DANTE está activo y escuchando comandos...");
-    console.log("💡 Comandos útiles: /top, /status, /performance, /help\n");
+    console.log("💡 Comandos útiles: /top, /status, /performance, /help, /ping\n");
 }
 
 main().catch(console.error);
